@@ -1,11 +1,53 @@
 Module.register("MMM-leapmirror", {
-    defaults: {},
-    start: function () { },
+    controller: undefined,
+    leapControllerOptions: {
+        enableGestures: true,
+    },
+    FRAME_BUFFER_SIZE: 10,
+    frameBuffer: [],
 
     defaults: {
-        foo: "I'm alive!"
+        foo: "I'm alive!",
+        actions: {
+            isAnyHand: true, //take left or right hand and set is as the main
+            leftHandActions: {
+                isAnyFinger: true,
+                finger0: {
+                    keyTap: "",
+                    screenTap: "",
+                    circleClockwise: "",
+                    circleCounterclockwise: "",
+                    swipeUp: "",
+                    swipeDown: "",
+                    swipeLeft: "PAGE_DECREMENT",
+                    swipeRight: "PAGE_INCREMENT",
+                },
+                // finger1: {},
+                // finger2: {},
+                // finger3: {},
+                // finger4: {},
+            },
+            // rightHandActions: {
+            // anyFinger: false,
+            // finger0: {},
+            // finger1: {},
+            // finger2: {},
+            // finger3: {},
+            // finger4: {},
+            // },
+        }
     },
+
     start: function () {
+        const isAnyHand = !!this.config.actions.isAnyHand;
+        if (isAnyHand) {
+            if (this.config.actions.leftHandActions) {
+                this.config.actions.anyHandActions = this.config.actions.leftHandActions;
+            }
+            else {
+                this.config.actions.anyHandActions = this.config.actions.rightHandActions;
+            }
+        }
         this.count = 0
     },
 
@@ -13,10 +55,18 @@ Module.register("MMM-leapmirror", {
         var element = document.createElement("div")
         element.className = "myContent"
         element.innerHTML = "Hello, World! " + this.config.foo
-        var subElement = document.createElement("p")
-        subElement.innerHTML = "Count:" + this.count
-        subElement.id = "COUNT"
-        element.appendChild(subElement)
+        var handElement = document.createElement("p")
+        handElement.innerHTML = "Hand:";
+        handElement.id = "HAND";
+        var fingerElement = document.createElement("p")
+        fingerElement.innerHTML = "Finger:";
+        fingerElement.id = "FINGER";
+        var gestureElement = document.createElement("p")
+        gestureElement.innerHTML = "Gesture:";
+        gestureElement.id = "GESTURE";
+        element.appendChild(handElement)
+        element.appendChild(gestureElement)
+        element.appendChild(fingerElement)
         return element
     },
 
@@ -24,24 +74,87 @@ Module.register("MMM-leapmirror", {
     notificationReceived: function (notification, payload, sender) {
         switch (notification) {
             case "DOM_OBJECTS_CREATED":
-                var timer = setInterval(() => {
-                    //   this.updateDom()
-                    var countElm = document.getElementById("COUNT")
-                    countElm.innerHTML = "Count:" + this.count
-                    this.count++
-                }, 1000)
-                Leap.loop(function (frame) {
-                    console.log(frame.hands.length); //gitara
+                
+            this.sendNotification("PAUSE_ROTATION") //should not be here, mmm-pages seems to lack a setting for that
+
+                this.controlller = Leap.loop((frame) => {
+                    //todo parse one frame -> cooldown -> repeat
+                    if (frame.hands.length) {
+                        if (this.frameBuffer.length < this.FRAME_BUFFER_SIZE) {
+                            this.frameBuffer.push(frame)
+                        }
+                        else {
+                            this.frameBufferParser();
+                            this.frameBuffer = [];
+                        }
+                    }
                 });
+                this.controlller.setBackground(true);
                 break
         }
     },
 
-    // https://forum.magicmirror.builders/topic/1515/how-to-load-a-script-src-script-into-my-mirror/2
+    useLeapGesture: function (frameGestureInfo) {
+        let possibleActions = {};
+        let isAnyFinger = false;
+        if (!this.config.actions.isAnyHand) {
+            if (frameGestureInfo.hand === 'left') {
+                possibleActions = this.config.actions.leftHandActions;
+                isAnyFinger = !!this.config.actions.leftHandActions.isAnyFinger
+            }
+            else {
+                possibleActions = this.config.actions.rightHandActions;
+                isAnyFinger = !!this.config.actions.rightHandActions.isAnyFinger
+            }
+        } else {
+            possibleActions = this.config.actions.anyHandActions;
+            isAnyFinger = this.config.actions.anyHandActions.isAnyFinger;
+        }
+        if (!isAnyFinger) {
+            possibleActions = possibleActions[`finger${frameGestureInfo.finger}`]
+        } else {
+            possibleActions = possibleActions['finger0']
+        }
+        console.log(`executinngAction -[${frameGestureInfo.direction}]: ${possibleActions[frameGestureInfo.direction]}`)
+        this.sendNotification(possibleActions[frameGestureInfo.direction]);
+    },
+
+    updateModuleView: function (frameGestureInfo) {
+        var handElm = document.getElementById("HAND")
+        handElm.innerHTML = "Hand:" + frameGestureInfo.hand;
+
+        var fingerElm = document.getElementById("FINGER")
+        fingerElm.innerHTML = "Finger:" + frameGestureInfo.finger;
+
+        var gestureElm = document.getElementById("GESTURE")
+        gestureElm.innerHTML = "Gesture:" + frameGestureInfo.direction;
+    },
+
+
+
+    frameBufferParser: function () {
+        const hasAnyGestures = this.frameBuffer.map(value => value.gestures.length).some((gestureCounter) => gestureCounter > 0);
+
+        if (hasAnyGestures) {
+            const handInfo = LeapHelper.parseHandInfo(this.frameBuffer)
+
+            LeapHelper.addGestureDirection(this.frameBuffer);
+            const dedupedGestures = LeapHelper.dedupContinuousMoves(this.frameBuffer.map(value => value.gestures).flat());
+
+            for (const gesture of dedupedGestures) {
+                const gestureInfo = LeapHelper.parseGestureInfo(gesture, handInfo);
+                this.useLeapGesture(gestureInfo);
+                this.updateModuleView(gestureInfo);
+            }
+
+        }
+    },
+
     getScripts: function () {
         return [
-            // 'https://js.leapmotion.com/leap-1.1.0.min.js',  // to by śmigało ale tego nie chcemy
-            this.file('./node_modules/leapjs/leap-1.1.1.min.js'), //file from module folder
+            this.file('./node_modules/leapjs/leap-1.0.0.min.js'), //file from module folder
+            this.file('./leapHelper.js'),
+            this.file('./node_modules/lodash/lodash.min.js')
         ]
     },
 

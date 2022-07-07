@@ -9,6 +9,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "leapjs": "^1.1.1"
+    "leapjs": "~1.0.0",
+    "lodash": "^4.17.21"
   }
 }
