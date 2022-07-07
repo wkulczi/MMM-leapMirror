@@ -3,8 +3,8 @@ Module.register("MMM-leapmirror", {
     leapControllerOptions: {
         enableGestures: true,
     },
-    FRAME_BUFFER_SIZE: 10,
-    frameBuffer: [],
+	frameBuffer: [],
+	gestureLock: false,
 
     defaults: {
         foo: "I'm alive!",
@@ -48,7 +48,6 @@ Module.register("MMM-leapmirror", {
                 this.config.actions.anyHandActions = this.config.actions.rightHandActions;
             }
         }
-        this.count = 0
     },
 
     getDom: function () {
@@ -64,9 +63,13 @@ Module.register("MMM-leapmirror", {
         var gestureElement = document.createElement("p")
         gestureElement.innerHTML = "Gesture:";
         gestureElement.id = "GESTURE";
+		var gestureLockElement = document.createElement("p")
+		gestureLockElement.innerHTML = "Lock: OFF";
+		gestureLockElement.id = "GESTURE_LOCK"
         element.appendChild(handElement)
         element.appendChild(gestureElement)
         element.appendChild(fingerElement)
+		element.appendChild(gestureLockElement)
         return element
     },
 
@@ -74,20 +77,25 @@ Module.register("MMM-leapmirror", {
     notificationReceived: function (notification, payload, sender) {
         switch (notification) {
             case "DOM_OBJECTS_CREATED":
-                
+
             this.sendNotification("PAUSE_ROTATION") //should not be here, mmm-pages seems to lack a setting for that
 
                 this.controlller = Leap.loop((frame) => {
-                    //todo parse one frame -> cooldown -> repeat
-                    if (frame.hands.length) {
-                        if (this.frameBuffer.length < this.FRAME_BUFFER_SIZE) {
-                            this.frameBuffer.push(frame)
-                        }
-                        else {
-                            this.frameBufferParser();
-                            this.frameBuffer = [];
-                        }
-                    }
+					this.updateGestureTilt();
+					if (!this.gestureLock){
+						if (frame.hands.length){
+							this.frameBuffer.push(frame)
+							const hasAnyGestures = this.frameBuffer.map(value => value.gestures.length).some((gestureCounter) => gestureCounter > 0);
+							if (hasAnyGestures) {
+								this.parseGesture();
+								this.gestureLock = true;
+								setTimeout(() => {
+									this.frameBuffer = [];
+									this.gestureLock = false;
+								}, 1000) //arbitrarily chosen number
+							}
+						}
+					}
                 });
                 this.controlller.setBackground(true);
                 break
@@ -130,12 +138,12 @@ Module.register("MMM-leapmirror", {
         gestureElm.innerHTML = "Gesture:" + frameGestureInfo.direction;
     },
 
+	updateGestureTilt: function (){
+		var handElm = document.getElementById("GESTURE_LOCK")
+		handElm.innerHTML = `Lock: ${this.gestureLock ? 'ON' : 'OFF'}`
+	},
 
-
-    frameBufferParser: function () {
-        const hasAnyGestures = this.frameBuffer.map(value => value.gestures.length).some((gestureCounter) => gestureCounter > 0);
-
-        if (hasAnyGestures) {
+    parseGesture: function () {
             const handInfo = LeapHelper.parseHandInfo(this.frameBuffer)
 
             LeapHelper.addGestureDirection(this.frameBuffer);
@@ -146,8 +154,6 @@ Module.register("MMM-leapmirror", {
                 this.useLeapGesture(gestureInfo);
                 this.updateModuleView(gestureInfo);
             }
-
-        }
     },
 
     getScripts: function () {
